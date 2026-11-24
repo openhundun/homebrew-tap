@@ -1,0 +1,37 @@
+name: update-cask
+
+on:
+  repository_dispatch:
+    types: [ignore-kit-release]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: download cask
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/cask Casks
+          gh release download latest \
+            --repo openhundun/ignore-kit \
+            --pattern ignore-compose.rb \
+            --dir /tmp/cask \
+            --clobber
+          cp /tmp/cask/ignore-compose.rb Casks/ignore-compose.rb
+      - name: commit
+        run: |
+          git config user.name openhundun-admin
+          git config user.email openhundun-admin@outlook.com
+          git add Casks/ignore-compose.rb
+          if git diff --cached --quiet; then
+            echo "cask unchanged"
+            exit 0
+          fi
+          git commit -m "chore: update ignore-compose cask [skip ci]"
+          git push
