@@ -1,0 +1,73 @@
+defaults:
+  run:
+    shell: bash --noprofile --norc -euo pipefail {0}
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - env:
+          GH_TOKEN: ${{ github.token }}
+        name: download release assets
+        run: |
+          rm -rf /tmp/release
+          mkdir -p /tmp/release
+          gh release download latest \
+            --repo openhundun/ignore-kit \
+            --pattern "ignore-compose-*.tar.gz" \
+            --dir /tmp/release \
+            --clobber
+      - name: write cask
+        run: |
+          macos_arm64_sha="$(sha256sum /tmp/release/ignore-compose-aarch64-apple-darwin.tar.gz | cut -d' ' -f1)"
+          macos_x86_64_sha="$(sha256sum /tmp/release/ignore-compose-x86_64-apple-darwin.tar.gz | cut -d' ' -f1)"
+          linux_arm64_sha="$(sha256sum /tmp/release/ignore-compose-aarch64-unknown-linux-musl.tar.gz | cut -d' ' -f1)"
+          linux_x86_64_sha="$(sha256sum /tmp/release/ignore-compose-x86_64-unknown-linux-musl.tar.gz | cut -d' ' -f1)"
+          cask="Casks/ignore-compose.rb"
+          if [[ -f "${cask}" ]] \
+            && grep -q "${macos_arm64_sha}" "${cask}" \
+            && grep -q "${macos_x86_64_sha}" "${cask}" \
+            && grep -q "${linux_arm64_sha}" "${cask}" \
+            && grep -q "${linux_x86_64_sha}" "${cask}"; then
+            echo "cask unchanged"
+            exit 0
+          fi
+          version="$(date -u +%Y%m%d%H%M%S)"
+          mkdir -p Casks
+          cat > "${cask}" <<EOF
+          cask "ignore-compose" do
+            arch arm: "aarch64", intel: "x86_64"
+            os macos: "apple-darwin", linux: "unknown-linux-musl"
+
+            version "${version}"
+            sha256 arm:          "${macos_arm64_sha}",
+                   intel:        "${macos_x86_64_sha}",
+                   arm64_linux:  "${linux_arm64_sha}",
+                   x86_64_linux: "${linux_x86_64_sha}"
+
+            url "https://github.com/openhundun/ignore-kit/releases/download/latest/ignore-compose-#{arch}-#{os}.tar.gz"
+            name "ignore-compose"
+            homepage "https://github.com/openhundun/ignore-kit"
+
+            binary "ignore-compose"
+          end
+          EOF
+          sed -i -e 's/^          //' "${cask}"
+      - name: commit
+        run: |
+          git config user.name openhundun-admin
+          git config user.email openhundun-admin@outlook.com
+          git add Casks/ignore-compose.rb
+          if git diff --cached --quiet; then
+            echo "cask unchanged"
+            exit 0
+          fi
+          git commit -m "chore: update ignore-compose cask [skip ci]"
+          git push
+name: update-cask
+on:
+  schedule:
+    - cron: 17 * * * *
+  workflow_dispatch:
+permissions:
+  contents: write
